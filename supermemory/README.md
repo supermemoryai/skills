@@ -123,9 +123,10 @@ Full reference for all SDK methods:
 
 ### 3. REST API Reference
 Complete endpoint documentation with cURL examples:
-- `POST /v3/documents` - Add documents
-- `POST /v3/search` - Search memories
-- `POST /v4/memories` - Create direct memories
+- `POST /v3/documents` - Add documents (memories auto-extracted)
+- `POST /v4/search` - Semantic + chunk search (preferred over legacy `/v3/search`)
+- `POST /v4/profile` - Retrieve user profile, optionally with inline search
+- `POST /v4/memories` - Create direct memories (bypass extraction)
 
 ### 4. Architecture Deep Dive
 Understand how Supermemory works:

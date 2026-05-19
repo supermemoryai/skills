@@ -22,12 +22,12 @@ import Supermemory from 'supermemory';
 const client = new Supermemory({ apiKey: process.env.SUPERMEMORY_API_KEY });
 
 // Add a memory
-await client.add({ content: "Meeting notes from Q1 planning", containerTags: ["user_123"] });
+await client.add({ content: "Meeting notes from Q1 planning", containerTag: "user_123" });
 
 // Search memories
-const response = await client.search.documents({
+const response = await client.search.memories({
   q: "planning notes",
-  containerTags: ["user_123"]
+  containerTag: "user_123"
 });
 
 // Get user profile
@@ -38,21 +38,21 @@ console.log(profile.profile.dynamic);
 // Add with metadata
 await client.add({
   content: "Technical design doc",
-  containerTags: ["user_123"],
+  containerTag: "user_123",
   metadata: { category: "engineering", priority: "high" }
 });
 
 // Search with filters
-const results = await client.search.documents({
+const results = await client.search.memories({
   q: "design document",
-  containerTags: ["user_123"],
+  containerTag: "user_123",
   filters: {
     AND: [{ key: "category", value: "engineering" }]
   }
 });
 
 // List documents
-const docs = await client.documents.list({ containerTags: ["user_123"], limit: 10 });
+const docs = await client.documents.list({ containerTag: "user_123", limit: 10 });
 
 // Delete a document
 await client.documents.delete({ docId: "doc_123" });
@@ -66,10 +66,10 @@ from supermemory import Supermemory
 client = Supermemory(api_key=os.environ.get("SUPERMEMORY_API_KEY"))
 
 # Add a memory
-client.add(content="Meeting notes from Q1 planning", container_tags=["user_123"])
+client.add(content="Meeting notes from Q1 planning", container_tag="user_123")
 
 # Search memories
-response = client.search.documents(q="planning notes", container_tags=["user_123"])
+response = client.search.memories(q="planning notes", container_tag="user_123")
 
 # Get user profile
 profile = client.profile(container_tag="user_123")
@@ -79,19 +79,19 @@ print(profile.profile.dynamic)
 # Add with metadata
 client.add(
     content="Technical design doc",
-    container_tags=["user_123"],
+    container_tag="user_123",
     metadata={"category": "engineering", "priority": "high"}
 )
 
 # Search with filters
-results = client.search.documents(
+results = client.search.memories(
     q="design document",
-    container_tags=["user_123"],
+    container_tag="user_123",
     filters={"AND": [{"key": "category", "value": "engineering"}]}
 )
 
 # List documents
-docs = client.documents.list(container_tags=["user_123"], limit=10)
+docs = client.documents.list(container_tag="user_123", limit=10)
 
 # Delete a document
 client.documents.delete(doc_id="doc_123")
@@ -512,4 +512,4 @@ curl https://api.supermemory.ai/v3/auth/scoped-key \
   -d '{"containerTag": "my-project", "expiresInDays": 30}'
 ```
 
-Scoped keys work on: `/v3/documents`, `/v3/memories`, `/v4/memories`, `/v3/search`, `/v4/search`, `/v4/profile`
+Scoped keys work on: `/v3/documents`, `/v4/memories`, `/v4/search`, `/v4/profile` (legacy `/v3/search` and `/v3/memories` are also accepted but new code should use the v4 endpoints)

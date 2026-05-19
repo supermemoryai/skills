@@ -762,21 +762,33 @@ async function addUserData(orgId: string, userId: string, content: string) {
 }
 
 // 3. Search with proper isolation
+// containerTag is a single string. To search across user + shared org data,
+// run two scoped searches and merge — never try to pass multiple tags at once.
 async function search(orgId: string, userId: string, query: string, includeShared: boolean = true) {
   const tags = getContainerTags(orgId, userId);
 
-  const containerTags = includeShared
-    ? [tags.user, tags.shared]  // User + org shared
-    : [tags.user];              // User only
-
-  const results = await memory.search.memories({
+  const userResults = await memory.search.memories({
     q: query,
-    containerTag: containerTags[0],  // Use first tag
+    containerTag: tags.user,
     threshold: 0.3,
-    limit: 10
+    limit: 10,
   });
 
-  return results;
+  if (!includeShared) return userResults;
+
+  const sharedResults = await memory.search.memories({
+    q: query,
+    containerTag: tags.shared,
+    threshold: 0.3,
+    limit: 10,
+  });
+
+  // Merge and dedupe by document/memory id, then sort by similarity.
+  const merged = [...userResults.results, ...sharedResults.results]
+    .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+    .slice(0, 10);
+
+  return { ...userResults, results: merged };
 }
 
 // Usage

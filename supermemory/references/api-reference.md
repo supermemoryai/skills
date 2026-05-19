@@ -119,12 +119,17 @@ Content-Type: application/json
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | The search query |
-| `containerTags` | string[] | No | Filter by container tags |
-| `chunkThreshold` | number | No | Threshold for chunk selection (0-1). 0 = least sensitive (more results), 1 = most sensitive (fewer, accurate results). Default: 0 |
-| `searchMode` | string | No | Search mode: "semantic" (default) or "hybrid" (semantic + keyword). Use "hybrid" for RAG applications for better accuracy |
-| `docId` | string | No | Search within specific document (max 255 chars) |
-| `filters` | object | No | Advanced filtering with AND/OR logic (up to 5 nesting levels) |
+| `q` | string | Yes | The search query |
+| `containerTag` | string | No | Scope the search to a single container (user, org, project). **Always pass this** — without it, the search runs against every doc the API key owns. |
+| `threshold` | number | No | Similarity threshold (0–1). Lower = more results, higher = fewer/more relevant. Default: 0.3 |
+| `searchMode` | string | No | `"hybrid"` (recommended — memories + chunks), `"memories"` (just extracted memories), or `"documents"` (just chunks) |
+| `limit` | number | No | Max results (default 10) |
+| `rerank` | boolean | No | Apply cross-encoder reranking. v4-only. |
+| `rewriteQuery` | boolean | No | LLM-rewrite the query before search. v4-only. |
+| `docId` | string | No | Search within a specific document (max 255 chars) |
+| `filters` | object | No | Advanced metadata filtering with AND/OR logic (up to 5 nesting levels) |
+
+> **Note:** Older docs referenced `query`, `containerTags` (plural array), and `chunkThreshold`. Those still work for backward compatibility on `/v3/search`, but new code should use the names above on `/v4/search`.
 
 **Filter Types:**
 

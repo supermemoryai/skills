@@ -1,490 +1,383 @@
 ---
 name: supermemory-cli
-description: Use the Supermemory CLI to programmatically manage memories, documents, profiles, tags, connectors, keys, and teams from the terminal. Covers all commands, flags, and usage patterns.
+description: Use the Supermemory CLI (`supermemory` 5.x on npm) from the terminal or from scripts and agents. Add content, search, read profiles, forget memories, manage documents, namespaces, connectors, API keys and team members, install coding-agent plugins, migrate a project to the v5 API, and run the local self-hosted server. Covers every command, subcommand, flag and the JSON output contract.
 ---
 
-The Supermemory CLI is the complete interface to Supermemory from the terminal. It lets you add memories, search, manage documents, configure projects, connect external data sources, and administer teams — all programmatically.
+The CLI ships inside the `supermemory` npm package and calls the v5 API. Every content command works in one **namespace**: a user id, a project id, or any boundary you want isolated.
 
-## Installation & Auth
+## Install and auth
 
 ```bash
-# Install globally
-npm install -g @supermemory/cli
+# Run without installing
+npx supermemory --version
 
-# Authenticate (opens browser OAuth flow)
+# Or install globally
+npm i -g supermemory
+
+# Browser login, stores credentials in ~/.supermemory/credentials.json
 supermemory login
 
 # Or use an API key directly
-supermemory login --api-key sm_abc_xxx
+supermemory login --api-key sm_xxx
 
-# Check auth status
+# Show who you are, the key prefix and whether the key is scoped
 supermemory whoami
+
+supermemory logout
 ```
+
+Commands that call the API need a login or `SUPERMEMORY_API_KEY`. `help`, `local` and `plugin` do not.
 
 ## Configuration
 
-The CLI supports three config scopes:
+Three scopes. `init` writes them, `config set` edits them.
 
-| Scope | File | Use Case |
-|-------|------|----------|
-| `project` | `.supermemory/config.json` (gitignored) | Per-machine secrets, API keys |
-| `team` | `.supermemory/team.json` (committed) | Shared tag, team-wide defaults |
-| `global` | `~/.config/supermemory/config.json` | All projects on this machine |
+| Scope | File | Holds |
+| --- | --- | --- |
+| `project` | `~/.supermemory/projects/<encoded-cwd>/config.json` (per machine, never in git) | `namespace`, optional `apiKey` |
+| `team` | `<git root>/.supermemory/config.json` (commit it) | `namespace` |
+| `global` | `~/.supermemory/config.json` | `output`, `apiUrl`, `consoleUrl`, `telemetry` |
+
+Namespace resolution order: `--namespace` flag, `SUPERMEMORY_NAMESPACE`, team config, project config. With none of these, content commands stop with "Namespace required".
 
 ```bash
-# Interactive setup wizard
+# Interactive wizard
 supermemory init
 
 # Non-interactive
-supermemory init --scope project --tag my-bot
-supermemory init --scope team --tag shared-project
+supermemory init --scope project --namespace meetings-bot
+supermemory init --scope team --namespace my-project
 supermemory init --scope global --output json
 
-# View/set config values
+# Show resolved config and where each value came from
 supermemory config
-supermemory config set tag my-project
-supermemory config set verbose true
-supermemory config get tag
+
+# Set a value; keys: apiKey, namespace, output, apiUrl, consoleUrl, telemetry
+supermemory config set namespace my-project --scope project
+supermemory config set output json --scope global
+supermemory config set telemetry off --scope global
+
+# Read one resolved value; keys: apiKey, namespace, apiUrl, consoleUrl, output
+supermemory config get namespace
 ```
 
-### Environment Variables
+### Environment variables
 
-| Variable | Description |
-|----------|-------------|
-| `SUPERMEMORY_API_KEY` | API key for authentication |
-| `SUPERMEMORY_TAG` | Override default container tag |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
+| Variable | Effect |
+| --- | --- |
+| `SUPERMEMORY_API_KEY` | API key. Overrides stored credentials and prints a warning when they differ. |
+| `SUPERMEMORY_NAMESPACE` | Default namespace. Renamed from `SUPERMEMORY_TAG`. |
+| `SUPERMEMORY_API_URL` | API base URL, for self-hosted servers. |
+| `SUPERMEMORY_CONSOLE_URL` | Console URL used by `open` and login. |
+| `DO_NOT_TRACK=1` | Disables anonymous usage telemetry (command name, outcome, versions, OS; never content or keys). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Export CLI traces to an OpenTelemetry collector. |
 
-### Global Flags
+### Global flags
 
-| Flag | Description |
-|------|-------------|
-| `--json` | Force JSON output (machine-readable) |
-| `--tag` | Override default container tag for this command |
-| `--help` | Show help for any command |
+| Flag | Effect |
+| --- | --- |
+| `--namespace <name>` | Override the namespace for this command |
+| `--json` | Force JSON output |
+| `--help` | Help for any command; `--help --json` gives a machine-readable schema |
 
----
+Output is JSON automatically when stdout is not a terminal, so pipes and agents get JSON without `--json`. `supermemory config set output human --scope global` forces text.
 
-## Core Commands
+## Core commands
 
-### `add` — Ingest content
+### `add`
 
-Ingest text, files, or URLs and extract memories into a container tag.
+Ingest text, a file or a URL into a namespace. The argument is detected: `http://` or `https://` is a URL, an existing path is uploaded as a file, anything else is text.
 
 ```bash
-# Add text
 supermemory add "User prefers TypeScript over JavaScript"
+supermemory add ./meeting-notes.pdf --namespace meetings
+supermemory add https://docs.example.com/api --namespace docs
 
-# Add a file (PDF, markdown, text, etc.)
-supermemory add ./meeting-notes.pdf --tag meetings
+# From stdin
+cat notes.txt | supermemory add --stdin --namespace notes
 
-# Add a URL
-supermemory add https://docs.example.com/api --tag docs
+# Metadata and a stable id; repeating the id updates the same document
+supermemory add "Design doc v2" --metadata '{"category":"engineering"}' --id design-doc
 
-# Read from stdin
-cat file.txt | supermemory add --stdin
-echo "some content" | supermemory add --stdin --tag notes
+# Memories ready right away instead of batched in the background
+supermemory add "Alex moved to Berlin" --dreaming instant
 
-# With metadata
-supermemory add "Design doc v2" --metadata '{"category": "engineering", "priority": "high"}'
+# Index for retrieval only, no memory extraction
+supermemory add ./handbook.md --task-type superrag
 
-# Custom document ID
-supermemory add "My doc" --id custom-doc-id --tag project
-
-# Batch mode (JSONL from stdin, each line: {"content": "...", "tag": "..."})
-cat batch.jsonl | supermemory add --batch
+# Batch: JSON array on stdin, items {content, id?, metadata?, namespace?}
+echo '[{"content":"first","id":"d1"},{"content":"second"}]' | supermemory add --batch
 ```
 
-**Options:**
-- `--tag <string>` — Container tag
-- `--stdin` — Read content from stdin
-- `--title <string>` — Document title
-- `--metadata <json>` — JSON metadata object
-- `--id <string>` — Custom document ID
-- `--batch` — Batch mode, reads JSONL from stdin
+Flags: `--namespace`, `--stdin`, `--metadata <json>`, `--id <string>`, `--dreaming dynamic|instant` (default `dynamic`), `--task-type memory|superrag` (default `memory`), `--batch`.
 
-### `search` — Search memories
+Processing continues after the command returns. Check it with `docs status <id>`.
 
-Semantic search across memories with filtering and reranking.
+### `search`
 
 ```bash
-# Basic search
 supermemory search "authentication patterns"
-
-# Scoped to a tag with limit
-supermemory search "auth" --tag api --limit 5
-
-# With reranking for better relevance
-supermemory search "database migrations" --rerank
-
-# Query rewriting (LLM rewrites query for better results)
+supermemory search "auth" --namespace api --limit 5 --rerank order
 supermemory search "how do we handle auth" --rewrite
 
-# Different search modes
-supermemory search "user prefs" --mode memories    # extracted memories only
-supermemory search "user prefs" --mode hybrid      # memories + document chunks
-supermemory search "user prefs" --mode documents   # full documents only
+# Modes: hybrid (default, memories + chunks), memories, chunks
+supermemory search "user prefs" --mode memories
+supermemory search "refund policy" --mode chunks --include documents
 
-# Include specific fields
-supermemory search "api design" --include summary,chunks,memories
+# Typed filter
+supermemory search "design" --filter '{"field":"category","operator":"eq","value":"engineering"}'
+supermemory search "design" --filter '{"operator":"and","operands":[{"field":"source","operator":"eq","value":"slack"},{"field":"priority","operator":"gte","value":3}]}'
 
-# Metadata filtering
-supermemory search "design" --filter '{"AND": [{"key": "category", "value": "engineering"}]}'
-
-# Similarity threshold (0-1)
 supermemory search "preferences" --threshold 0.5
 ```
 
-**Options:**
-- `--tag <string>` — Filter by container tag
-- `--limit <number>` — Max results (default: 10)
-- `--threshold <number>` — Similarity threshold 0-1 (default: 0)
-- `--rerank` — Enable reranking for better relevance
-- `--rewrite` — Rewrite query using LLM
-- `--mode <string>` — `memories` | `hybrid` | `documents` (default: memories)
-- `--include <string>` — Fields: summary, chunks, memories, document
-- `--filter <json>` — Metadata filter object
+Flags: `--namespace`, `--limit` (default 10), `--threshold` 0 to 1 (default 0.3), `--rerank none|order|aggregate` (default `none`), `--rewrite`, `--mode hybrid|memories|chunks` (default `hybrid`), `--include documents,related,forgotten`, `--filter <json>`.
 
-### `remember` — Store a memory directly
+### `profile`
 
-Store a specific fact or memory without ingesting a full document.
+The maintained profile for a namespace: `static` facts, `dynamic` recent context, and named `buckets`. No query argument; use `search` for ranked results.
 
 ```bash
-# Store a memory
-supermemory remember "User prefers dark mode" --tag user_123
-
-# Mark as permanent/static (won't decay)
-supermemory remember "User is a senior engineer at Acme Corp" --static --tag user_123
-
-# With metadata
-supermemory remember "Discussed Q3 roadmap" --tag meetings --metadata '{"type": "decision"}'
-```
-
-**Options:**
-- `--tag <string>` — Container tag
-- `--static` — Mark as permanent memory
-- `--metadata <json>` — JSON metadata
-
-### `forget` — Delete a memory
-
-```bash
-# Forget by memory ID
-supermemory forget mem_abc123 --tag default
-
-# Forget by content match
-supermemory forget --content "outdated preference" --tag default
-
-# With reason
-supermemory forget mem_abc123 --reason "User corrected this information"
-```
-
-**Options:**
-- `--tag <string>` — Container tag
-- `--reason <string>` — Reason for forgetting
-- `--content <string>` — Forget by content match instead of ID
-
-### `update` — Update an existing memory
-
-```bash
-supermemory update mem_123 "Updated preference: prefers Bun over Node"
-supermemory update mem_123 "New content" --metadata '{"updated": true}'
-```
-
-**Options:**
-- `--tag <string>` — Container tag
-- `--metadata <json>` — Updated metadata
-- `--reason <string>` — Reason for update
-
-### `profile` — Get user profile
-
-Retrieve the auto-generated user profile for a container tag.
-
-```bash
-# Get profile for default tag
 supermemory profile
+supermemory profile --namespace user_alex
 
-# Get profile for specific tag
-supermemory profile user_123
-
-# Search within the profile
-supermemory profile user_123 --query "programming preferences"
+# Build the profile from matching memories only
+supermemory profile --filter '{"field":"region","operator":"eq","value":"us-west"}'
 ```
 
-Returns static facts (long-term) and dynamic context (recent activity).
-
----
-
-## Document Management
-
-### `docs` — Manage documents
+### `forget`
 
 ```bash
-# List documents
-supermemory docs list --tag default --limit 20
+# By memory id, comma-separated for several
+supermemory forget mem_abc123 --namespace user_alex
+supermemory forget mem_1,mem_2
 
-# Get a specific document
+# By meaning: preview first, then run without --dry-run
+supermemory forget --query "old office address" --dry-run
+supermemory forget --query "old office address"
+```
+
+Flags: `--namespace`, `--query <text>`, `--dry-run`. There is no `--reason` and no direct memory write; memories come from documents, so change the source document to change a memory.
+
+## Documents
+
+```bash
+supermemory docs list --namespace default --limit 20 --page 2
 supermemory docs get doc_abc123
-
-# Check processing status
-supermemory docs status doc_abc123
-
-# View document chunks
+supermemory docs status doc_abc123        # pipeline stage: queued, extracting, chunking, embedding, indexing, done, failed
 supermemory docs chunks doc_abc123
-
-# Delete a document
-supermemory docs delete doc_abc123 --yes
+supermemory docs delete doc_abc123 --yes  # comma-separated ids for several
 ```
 
-**Subcommands:** `list`, `get`, `delete`, `chunks`, `status`
+Subcommands: `list`, `get`, `delete`, `chunks`, `status`. Flags: `--namespace`, `--limit` (default 20), `--page`, `--yes`.
 
----
+## Namespaces
 
-## Container Tags
-
-### `tags` — Manage container tags
-
-Container tags scope memories to users, projects, or any logical grouping.
+Renamed from `tags`. A namespace is created the first time you add content with its name; there is no `create` subcommand.
 
 ```bash
-# List all tags
-supermemory tags list
+supermemory namespaces list
+supermemory namespaces info user_alex
 
-# Get tag info (memory count, doc count, etc.)
-supermemory tags info user_123
+# Supporting context guides memory extraction in this namespace
+supermemory namespaces context user_alex --set "Paying customer on the Pro plan"
+supermemory namespaces context user_alex --clear
 
-# Create a new tag
-supermemory tags create my-new-project
-
-# Set context on a tag (injected into profile responses)
-supermemory tags context user_123 --set "This user is a premium customer"
-
-# Clear context
-supermemory tags context user_123 --clear
-
-# Merge tags (moves all memories from source to target)
-supermemory tags merge old-tag --into new-tag --yes
-
-# Delete a tag
-supermemory tags delete old-tag --yes
+# Delete, or move everything into another namespace first (replaces tags merge)
+supermemory namespaces delete old-project --yes
+supermemory namespaces delete old-project --move-to new-project --yes
 ```
 
-**Subcommands:** `list`, `info`, `create`, `delete`, `context`, `merge`
-
----
-
-## API Keys
-
-### `keys` — Manage API keys
-
-```bash
-# List all keys
-supermemory keys list
-
-# Create a new key
-supermemory keys create --name my-agent --permission write
-
-# Create a scoped key (restricted to one container tag)
-supermemory keys create --name bot-key --tag user_123 --expires 30
-
-# Revoke a key
-supermemory keys revoke key_abc123 --yes
-
-# Toggle a key on/off
-supermemory keys toggle key_abc123
-```
-
-**Subcommands:** `list`, `create`, `revoke`, `toggle`
-
----
+Subcommands: `list`, `info`, `delete`, `context`. Flags: `--set <text>`, `--clear`, `--move-to <namespace>`, `--yes`.
 
 ## Connectors
 
-### `connectors` — External data sources
-
-Connect Google Drive, Notion, OneDrive, and other services to automatically sync documents.
+Providers: `google-drive`, `notion`, `onedrive`, `gmail`, `github`, `web-crawler`, `s3`, `granola`. OAuth providers open the browser; `web-crawler` and `s3` take `--config` and start syncing at once.
 
 ```bash
-# List connected services
 supermemory connectors list
+supermemory connectors list --namespace docs
 
-# Connect a service (opens OAuth flow)
-supermemory connectors connect google-drive --tag docs
-supermemory connectors connect notion --tag notes
+supermemory connectors connect google-drive --namespace docs
+supermemory connectors connect notion --namespace notes --no-browser
+supermemory connectors connect web-crawler --namespace docs --config '{"startUrl":"https://docs.example.com"}'
+supermemory connectors connect github --namespace code --document-limit 500
 
-# Trigger a sync
 supermemory connectors sync conn_abc123
-
-# View sync history
-supermemory connectors history conn_abc123 --limit 10
-
-# List synced resources
-supermemory connectors resources conn_abc123
-
-# Disconnect
-supermemory connectors disconnect conn_abc123 --yes
+supermemory connectors history conn_abc123
+supermemory connectors picker conn_abc123        # choose what the connector syncs
+supermemory connectors disconnect conn_abc123 --delete-documents --yes
 ```
 
-**Subcommands:** `list`, `connect`, `sync`, `history`, `disconnect`, `resources`
+Subcommands: `list`, `connect`, `sync`, `history`, `picker`, `disconnect`. Flags: `--namespace`, `--document-limit <n>`, `--config <json>`, `--no-browser`, `--delete-documents`, `--yes`.
 
----
-
-## Plugins
-
-### `plugins` — IDE and tool integrations
-
-Connect the CLI to Claude Code, Cursor, and other tools.
+## API keys
 
 ```bash
-# List available plugins
-supermemory plugins list
+supermemory keys list
+supermemory keys create --name my-agent --permission write
 
-# Connect a plugin (with auto-configuration)
-supermemory plugins connect claude-code --auto-configure
-supermemory plugins connect cursor --auto-configure
+# Scoped key: one or more namespaces, expires in 30 days
+supermemory keys create --name bot-key --permission read --namespace user_123 --expires 30
 
-# Check plugin status
-supermemory plugins status claude-code
-
-# Revoke a plugin connection
-supermemory plugins revoke claude-code --yes
+supermemory keys revoke key_abc123 --yes
+supermemory keys toggle key_abc123
 ```
 
-**Subcommands:** `list`, `connect`, `revoke`, `status`
+Subcommands: `list`, `create`, `revoke`, `toggle`. Flags: `--name` (required for create), `--permission read|write` (default `write`), `--namespace <a,b>`, `--expires <days>`, `--yes`.
 
----
+### Scoped keys
 
-## Team Management
+With a key scoped to a namespace, only `search`, `add`, `forget`, `profile` and `whoami` are available, and the namespace is set from the key. `help` shows only those commands.
 
-### `team` — Manage team members
+## Team
 
 ```bash
-# List team members
 supermemory team list
-
-# Invite a member
 supermemory team invite user@example.com --role admin
-supermemory team invite user@example.com --role member
-
-# Change a member's role
 supermemory team role member_123 admin
-
-# Remove a member
 supermemory team remove member_123 --yes
-
-# View pending invitations
 supermemory team invitations
 ```
 
-**Subcommands:** `list`, `invite`, `remove`, `role`, `invitations`
+Subcommands: `list`, `invite`, `remove`, `role`, `invitations`. Flags: `--role admin|member` (default `member`), `--yes`.
 
----
-
-## Monitoring
-
-### `status` — Account dashboard
+## Status, logs, billing
 
 ```bash
-supermemory status
-supermemory status --period 7d    # 24h, 7d, 30d, all
-```
+supermemory status --period 7d            # 24h, 7d, 30d, all (default all)
 
-Shows memory count, document count, API usage, and storage.
-
-### `logs` — Request logs
-
-```bash
-# Recent logs
-supermemory logs
-
-# Filter by time period
-supermemory logs --period 7d
-
-# Filter by status
-supermemory logs --status error
-
-# Filter by request type
-supermemory logs --type search
-
-# Get a specific log entry
+supermemory logs                          # last 24h
+supermemory logs --period 7d --status error --type search --limit 50 --page 2
 supermemory logs get req_abc123
+
+supermemory billing                        # plan and usage summary
+supermemory billing usage
+supermemory billing invoices
 ```
 
-### `billing` — Usage and billing
+## Coding-agent plugins
+
+`plugin` installs the Supermemory integration into coding agents on this machine and connects them with browser OAuth. `plugins` manages API-key based connections from the console side.
 
 ```bash
-supermemory billing          # Overview
-supermemory billing usage    # Detailed usage breakdown
-supermemory billing invoices # Past invoices
+# Detect installed agents and pick interactively
+supermemory plugin
+
+# Non-interactive, targets: claude, cursor, opencode, codex
+supermemory plugin --all
+supermemory plugin --only claude,cursor --dry-run
+supermemory plugin --all --no-auth                # install only, connect later
+supermemory plugin --only codex --force           # run even if the app is not detected
+
+supermemory plugin login --all
+supermemory plugin login --only codex --no-browser
+supermemory plugin uninstall --only cursor --dry-run
+supermemory plugin uninstall --all
 ```
 
----
-
-## Utility Commands
+`plugin` flags: `--all`, `--only <list>`, `--dry-run`, `--force`, `--no-auth`. `plugin login`: `--all`, `--only`, `--no-browser`. `plugin uninstall`: `--all`, `--only`, `--dry-run`.
 
 ```bash
-# Open Supermemory console in browser
-supermemory open
-supermemory open graph       # Memory graph view
-supermemory open billing
-supermemory open settings
-supermemory open docs
-supermemory open keys
-
-# Machine-readable help (useful for LLM agents)
-supermemory help --json
-supermemory help --all
-
-# Per-command help
-supermemory search --help
-supermemory tags --help --json
+# Key-based plugin connections; ids: claude-code, cursor, opencode, openclaw
+supermemory plugins list
+supermemory plugins connect claude-code --auto-configure
+supermemory plugins status
+supermemory plugins revoke claude-code --yes
 ```
 
----
+## `setup` and `migrate`
 
-## Scoped Keys Mode
-
-When using a scoped API key (restricted to a single container tag), only these commands are available:
-
-`search`, `add`, `remember`, `forget`, `update`, `profile`, `whoami`
-
-The tag is automatically set from the key's scope — no need to pass `--tag`.
-
----
-
-## Common Patterns
-
-### Pipe content from other tools
+Both detect the project, build a prompt, and launch a coding agent with it. Agents: `claude-code`, `codex`, `cline`, `aider`, `opencode`, `goose`, `amp`.
 
 ```bash
-# Ingest git log
-git log --oneline -20 | supermemory add --stdin --tag git-history
+# Integrate Supermemory into this project
+supermemory setup
+supermemory setup --prompt                 # print the prompt instead
 
-# Ingest command output
-curl -s https://api.example.com/docs | supermemory add --stdin --tag api-docs
-
-# Pipe search results to jq
-supermemory search "auth" --json | jq '.results[].memory'
+# Move this project from the v3/v4 API to v5
+supermemory migrate
+supermemory migrate --agent codex
+supermemory migrate --prompt
 ```
 
-### Scripting with JSON output
+`migrate` scans for legacy packages and names (`containerTag`, `customId`, `/v3/`, `/v4/`) and exits early when there is nothing to migrate.
+
+## Local self-hosted server
+
+Installs and runs the free single-binary `supermemory-server` on macOS or Linux. Not available on Windows yet; download the `.exe` from GitHub Releases or use Docker instead.
 
 ```bash
-# All commands support --json for machine-readable output
-supermemory search "query" --json
-supermemory tags list --json
-supermemory profile user_123 --json
-supermemory status --json
+supermemory local                          # same as local start
+supermemory local install
+supermemory local install --version 0.0.9
+supermemory local start --port 9000
+supermemory local start --no-install
+supermemory local start -- --log-level debug   # args after -- go to the server
+supermemory local upgrade
+supermemory local status
+supermemory local status --url http://localhost:9000
+supermemory local version
+supermemory local path
+supermemory local env
 ```
 
-### CI/CD integration
+Subcommands: `start`, `install`, `upgrade`, `status`, `version`, `path`, `env`. Point the CLI at it with `SUPERMEMORY_API_URL=http://localhost:6767`.
+
+## `open` and `help`
 
 ```bash
-# Use env var for auth
-export SUPERMEMORY_API_KEY=sm_abc_xxx
+supermemory open                           # console
+supermemory open graph                     # pages: console, billing, graph, connectors, settings, docs, keys, team, agents
+supermemory open billing --no-browser      # print the URL
 
-# Ingest docs on deploy
-supermemory add ./docs/api-reference.md --tag api-docs --id api-ref-latest
-
-# Check status
-supermemory status --json | jq '.memoryCount'
+supermemory help
+supermemory help --json                    # full command schema for agents
+supermemory search --help --json
 ```
+
+## Scripting
+
+```bash
+export SUPERMEMORY_API_KEY=sm_xxx
+export SUPERMEMORY_NAMESPACE=api-docs
+
+# Pipes are JSON by default
+git log --oneline -20 | supermemory add --stdin --id git-history
+supermemory search "auth" | jq '.results[] | .memory // .chunk'
+supermemory profile | jq '.profile.static[].memory'
+
+# Ingest on deploy with a stable id so the doc updates in place
+supermemory add ./docs/api-reference.md --id api-ref-latest
+
+# Wait for processing
+until supermemory docs status "$ID" | jq -e '.status == "done"' >/dev/null; do sleep 2; done
+```
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Error, including validation and API errors |
+| 2 | Authentication required |
+| 3 | Permission denied |
+| 4 | Not found |
+
+Errors print to stderr as `✗ message` with a `hint:` line when there is a next step, so stdout stays clean JSON.
+
+## Renamed or removed since 1.x
+
+| Before | Now |
+| --- | --- |
+| `npm i -g @supermemory/cli` | `npm i -g supermemory` or `npx supermemory` |
+| `--tag`, `SUPERMEMORY_TAG` | `--namespace`, `SUPERMEMORY_NAMESPACE` |
+| `tags list|info|context|delete` | `namespaces list|info|context|delete` |
+| `tags create` | add content with the new namespace |
+| `tags merge a --into b` | `namespaces delete a --move-to b` |
+| `remember`, `update` | removed; add or update the source document |
+| `forget --content`, `--reason` | `forget --query` with `--dry-run`; no reason field |
+| `search --mode documents`, `--rerank` (boolean) | `--mode chunks`, `--rerank order|aggregate` |
+| `search --filter '{"AND":[{"key":..}]}'` | typed filter `{"operator":"and","operands":[{"field":..,"operator":"eq","value":..}]}` |
+| `profile <namespace> --query` | `profile --namespace <name>`; use `search` for queries |
+| `connectors resources` | `connectors picker` |
